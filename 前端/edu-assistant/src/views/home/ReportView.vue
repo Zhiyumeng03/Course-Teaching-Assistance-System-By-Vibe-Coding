@@ -1,65 +1,62 @@
 <template>
   <div class="report-page">
-    <section class="page-hero">
+    <div class="page-hero">
       <div>
-        <p class="hero-eyebrow">{{ isTeacher ? '教师工作台' : '学生中心' }}</p>
-        <h2 class="hero-title">{{ isTeacher ? '实验报告批改与 AI 风险辅助' : '我的实验报告' }}</h2>
-        <p class="hero-desc">
-          {{ isTeacher
-            ? '查看提交进度、快速启动 AI 风险检测，并在同一处完成评分与评语。'
-            : '查看自己的报告版本、教师批改结果，以及实验报告的 AI 风险检测结论。' }}
+        <h2 class="page-title">{{ isTeacher ? '实验报告批改中心' : '我的实验报告' }}</h2>
+        <p class="page-desc">
+          {{ isTeacher ? '按实验查看提交进度、待批改人数，并直接展开版本进行批阅。' : '查看自己提交的报告，展开后查看版本列表并进入批改详情页。' }}
         </p>
       </div>
       <el-button v-if="!isTeacher" type="primary" round @click="goExperimentList">前往实验列表</el-button>
-    </section>
+    </div>
 
     <div v-if="loading" class="loading-wrap">
       <el-skeleton animated :rows="8" />
     </div>
 
     <template v-else-if="isTeacher">
-      <section class="stats-grid">
-        <article class="stats-card teal">
-          <span>负责实验</span>
-          <strong>{{ teacherSummary.taskCount }}</strong>
-        </article>
-        <article class="stats-card blue">
-          <span>已提交人数</span>
-          <strong>{{ teacherSummary.submittedCount }}</strong>
-        </article>
-        <article class="stats-card orange">
-          <span>待批改</span>
-          <strong>{{ teacherSummary.pendingReviewCount }}</strong>
-        </article>
-        <article class="stats-card rose">
-          <span>需修改</span>
-          <strong>{{ teacherSummary.revisionRequiredCount }}</strong>
-        </article>
-      </section>
+      <div class="stats-grid">
+        <div class="stats-card primary">
+          <span class="stats-label">负责实验</span>
+          <strong class="stats-value">{{ teacherSummary.taskCount }}</strong>
+        </div>
+        <div class="stats-card success">
+          <span class="stats-label">已提交</span>
+          <strong class="stats-value">{{ teacherSummary.submittedCount }}</strong>
+        </div>
+        <div class="stats-card warning">
+          <span class="stats-label">待批改</span>
+          <strong class="stats-value">{{ teacherSummary.pendingReviewCount }}</strong>
+        </div>
+        <div class="stats-card danger">
+          <span class="stats-label">需修订</span>
+          <strong class="stats-value">{{ teacherSummary.revisionRequiredCount }}</strong>
+        </div>
+      </div>
 
-      <el-empty v-if="!teacherTasks.length" description="当前没有需要处理的实验报告任务" />
+      <el-empty v-if="!teacherTasks.length" description="暂无你负责的报告任务" />
 
-      <div v-else class="task-list">
+      <div v-else class="teacher-task-list">
         <section v-for="task in teacherTasks" :key="task.experimentId" class="task-card">
-          <div class="task-head">
+          <div class="task-header">
             <div>
-              <h3>{{ task.experimentTitle }}</h3>
-              <p>{{ task.courseName }} · 实验 ID {{ task.experimentId }}</p>
+              <h3 class="task-title">{{ task.experimentTitle }}</h3>
+              <p class="task-meta">{{ task.courseName }} · 实验ID {{ task.experimentId }}</p>
             </div>
             <div class="task-tags">
-              <el-tag effect="light">总人数 {{ task.totalStudents || 0 }}</el-tag>
+              <el-tag type="info" effect="light">总人数 {{ task.totalStudents || 0 }}</el-tag>
               <el-tag type="success" effect="light">已提交 {{ task.submittedCount || 0 }}</el-tag>
               <el-tag type="warning" effect="light">待批改 {{ task.pendingReviewCount || 0 }}</el-tag>
-              <el-tag type="info" effect="light">未提交 {{ task.unsubmittedCount || 0 }}</el-tag>
+              <el-tag type="danger" effect="light">未提交 {{ task.unsubmittedCount || 0 }}</el-tag>
             </div>
           </div>
 
-          <el-table :data="task.students || []" empty-text="暂无学生数据" class="student-table">
+          <el-table :data="task.students || []" class="student-table" empty-text="暂无学生数据">
             <el-table-column type="expand">
               <template #default="{ row }">
                 <div class="expand-panel">
-                  <div v-if="!row.reportId" class="empty-state">该学生暂未提交本实验报告。</div>
-                  <el-collapse v-else class="version-collapse">
+                  <div v-if="!row.reportId" class="empty-version">学生尚未提交该实验报告。</div>
+                  <el-collapse v-else>
                     <el-collapse-item
                       v-for="version in row.versions || []"
                       :key="version.reportVersionId"
@@ -67,67 +64,30 @@
                     >
                       <template #title>
                         <div class="version-title">
-                          <strong>第 {{ version.versionNo }} 版</strong>
+                          <span>第 {{ version.versionNo }} 版</span>
                           <span>{{ fmt(version.submittedAt) }}</span>
                           <el-tag size="small" :type="reviewTagType(version.action)">
                             {{ reviewLabel(version.action) }}
                           </el-tag>
-                          <el-tag
-                            v-if="version.aiRiskScore != null"
-                            size="small"
-                            effect="dark"
-                            :type="riskTagType(versionRiskLevel(version))"
-                          >
-                            {{ riskLabel(versionRiskLevel(version)) }} · {{ version.aiRiskScore }}%
-                          </el-tag>
-                          <el-tag v-else size="small" type="info" effect="plain">未检测</el-tag>
                         </div>
                       </template>
 
                       <div class="version-body">
                         <div class="version-summary">
-                          <span>字数 {{ version.wordCount || 0 }}</span>
-                          <span>得分 {{ version.score ?? '-' }}</span>
+                          <span v-if="version.score != null">评分 {{ version.score }}</span>
                           <span v-if="version.teacherName">批改教师 {{ version.teacherName }}</span>
                         </div>
-
-                        <div v-if="aiSummary(version)" class="ai-summary">
-                          <el-icon><Warning /></el-icon>
-                          <span>{{ aiSummary(version) }}</span>
-                        </div>
-
-                        <div v-if="version.commentText" class="info-box">
+                        <div v-if="version.commentText" class="review-box">
                           <strong>评语：</strong>{{ version.commentText }}
                         </div>
-                        <div v-if="version.revisionRequirement" class="info-box revision">
-                          <strong>修改要求：</strong>{{ version.revisionRequirement }}
+                        <div v-if="version.revisionRequirement" class="review-box revision">
+                          <strong>修订要求：</strong>{{ version.revisionRequirement }}
                         </div>
-
                         <div v-if="version.contentHtml" class="content-preview ql-snow">
                           <div class="ql-editor" v-html="version.contentHtml" />
                         </div>
-
                         <div class="version-actions">
-                          <el-button
-                            type="warning"
-                            plain
-                            round
-                            size="small"
-                            :loading="analyzingKey === getAnalyzeKey(row.reportId, version.reportVersionId)"
-                            @click="runVersionAnalysis(row.reportId, version.reportVersionId)"
-                          >
-                            {{ version.aiRiskScore == null ? 'AI 检测' : '重新检测' }}
-                          </el-button>
-                          <el-button
-                            type="primary"
-                            plain
-                            round
-                            size="small"
-                            @click="goReviewDetail(row.reportId, version.reportVersionId)"
-                          >
-                            查看详情
-                          </el-button>
-                          <el-button type="primary" round size="small" @click="openReviewDialog(task, row, version)">
+                          <el-button type="primary" size="small" round @click="openReviewDialog(task, row, version)">
                             批改此版本
                           </el-button>
                         </div>
@@ -138,7 +98,7 @@
               </template>
             </el-table-column>
 
-            <el-table-column label="学生" min-width="160">
+            <el-table-column label="学生" min-width="150">
               <template #default="{ row }">
                 <div class="student-cell">
                   <strong>{{ row.studentName }}</strong>
@@ -146,7 +106,6 @@
                 </div>
               </template>
             </el-table-column>
-
             <el-table-column label="状态" width="120">
               <template #default="{ row }">
                 <el-tag :type="statusTagType(row.status)" effect="light">
@@ -154,16 +113,13 @@
                 </el-tag>
               </template>
             </el-table-column>
-
-            <el-table-column label="版本数" width="100">
+            <el-table-column label="提交版本" width="100">
               <template #default="{ row }">{{ row.latestVersionNo || 0 }}</template>
             </el-table-column>
-
             <el-table-column label="最终得分" width="100">
               <template #default="{ row }">{{ row.finalScore ?? '-' }}</template>
             </el-table-column>
-
-            <el-table-column label="最近提交" min-width="180">
+            <el-table-column label="最近提交" min-width="170">
               <template #default="{ row }">{{ fmt(row.lastSubmittedAt) || '-' }}</template>
             </el-table-column>
           </el-table>
@@ -172,26 +128,26 @@
     </template>
 
     <template v-else>
-      <section class="stats-grid">
-        <article class="stats-card teal">
-          <span>报告数量</span>
-          <strong>{{ studentSummary.reportCount }}</strong>
-        </article>
-        <article class="stats-card blue">
-          <span>提交版本</span>
-          <strong>{{ studentSummary.versionCount }}</strong>
-        </article>
-        <article class="stats-card orange">
-          <span>已批改版本</span>
-          <strong>{{ studentSummary.reviewedCount }}</strong>
-        </article>
-        <article class="stats-card slate">
-          <span>平均得分</span>
-          <strong>{{ studentSummary.avgScore }}</strong>
-        </article>
-      </section>
+      <div class="stats-grid">
+        <div class="stats-card primary">
+          <span class="stats-label">报告数量</span>
+          <strong class="stats-value">{{ studentSummary.reportCount }}</strong>
+        </div>
+        <div class="stats-card success">
+          <span class="stats-label">已提交版本</span>
+          <strong class="stats-value">{{ studentSummary.versionCount }}</strong>
+        </div>
+        <div class="stats-card warning">
+          <span class="stats-label">已批改</span>
+          <strong class="stats-value">{{ studentSummary.reviewedCount }}</strong>
+        </div>
+        <div class="stats-card neutral">
+          <span class="stats-label">平均得分</span>
+          <strong class="stats-value">{{ studentSummary.avgScore }}</strong>
+        </div>
+      </div>
 
-      <el-empty v-if="!studentReports.length" description="你还没有实验报告记录" />
+      <el-empty v-if="!studentReports.length" description="暂无已创建的报告记录" />
 
       <el-collapse v-else class="report-collapse">
         <el-collapse-item
@@ -207,13 +163,15 @@
                 <p>{{ report.courseName }} · {{ report.teacherName || '未分配教师' }}</p>
               </div>
               <div class="report-title-side">
-                <el-tag :type="statusTagType(report.status)" effect="light">
-                  {{ statusLabel(report.status) }}
-                </el-tag>
-                <span>版本 {{ report.latestVersionNo || 0 }}</span>
-                <span>最终得分 {{ report.finalScore ?? '-' }}</span>
+                <div class="report-title-meta">
+                  <el-tag :type="statusTagType(report.status)" effect="light">
+                    {{ statusLabel(report.status) }}
+                  </el-tag>
+                  <span>版本 {{ report.latestVersionNo || 0 }}</span>
+                  <span>最终分 {{ report.finalScore ?? '-' }}</span>
+                </div>
                 <el-button type="primary" plain round size="small" @click.stop="goSubmit(report.experimentId)">
-                  继续编辑
+                  重新修改提交
                 </el-button>
               </div>
             </div>
@@ -233,27 +191,17 @@
               >
                 <div class="student-version-main">
                   <div class="version-title">
-                    <strong>第 {{ version.versionNo }} 版</strong>
+                    <span>第 {{ version.versionNo }} 版</span>
                     <span>{{ fmt(version.submittedAt) }}</span>
                     <el-tag size="small" :type="reviewTagType(version.action)">
                       {{ reviewLabel(version.action) }}
-                    </el-tag>
-                    <el-tag
-                      v-if="version.aiRiskScore != null"
-                      size="small"
-                      effect="dark"
-                      :type="riskTagType(versionRiskLevel(version))"
-                    >
-                      {{ riskLabel(versionRiskLevel(version)) }} · {{ version.aiRiskScore }}%
                     </el-tag>
                   </div>
                   <div class="version-summary">
                     <span>得分 {{ version.score ?? '-' }}</span>
                     <span>批改时间 {{ fmt(version.reviewedAt) || '未批改' }}</span>
                   </div>
-                  <p v-if="aiSummary(version)" class="student-ai-summary">{{ aiSummary(version) }}</p>
                 </div>
-
                 <el-button
                   type="primary"
                   plain
@@ -261,7 +209,7 @@
                   size="small"
                   @click="goReviewDetail(report.reportId, version.reportVersionId)"
                 >
-                  查看详情
+                  查看批改详情
                 </el-button>
               </div>
             </div>
@@ -270,7 +218,7 @@
       </el-collapse>
     </template>
 
-    <el-dialog v-model="reviewDialog.visible" title="批改报告版本" width="760px" destroy-on-close>
+    <el-dialog v-model="reviewDialog.visible" title="批改报告版本" width="680px" destroy-on-close>
       <div v-if="reviewDialog.version" class="review-dialog-body">
         <div class="dialog-summary">
           <el-tag type="info" effect="light">{{ reviewDialog.task?.experimentTitle }}</el-tag>
@@ -279,39 +227,18 @@
           <span>{{ fmt(reviewDialog.version.submittedAt) }}</span>
         </div>
 
-        <div class="dialog-ai-bar">
-          <el-tag
-            v-if="reviewDialog.version.aiRiskScore != null"
-            :type="riskTagType(versionRiskLevel(reviewDialog.version))"
-            effect="dark"
-          >
-            {{ riskLabel(versionRiskLevel(reviewDialog.version)) }} · {{ reviewDialog.version.aiRiskScore }}%
-          </el-tag>
-          <span class="dialog-ai-text">{{ aiSummary(reviewDialog.version) || '当前版本还没有 AI 检测结果。' }}</span>
-          <el-button
-            type="warning"
-            plain
-            round
-            size="small"
-            :loading="analyzingKey === getAnalyzeKey(reviewDialog.student?.reportId, reviewDialog.version?.reportVersionId)"
-            @click="runVersionAnalysis(reviewDialog.student?.reportId, reviewDialog.version?.reportVersionId, true)"
-          >
-            {{ reviewDialog.version.aiRiskScore == null ? 'AI 检测' : '重新检测' }}
-          </el-button>
-        </div>
-
         <div v-if="reviewDialog.version.contentHtml" class="dialog-preview ql-snow">
           <div class="ql-editor" v-html="reviewDialog.version.contentHtml" />
         </div>
 
-        <el-form label-width="88px" class="review-form">
+        <el-form label-width="84px" class="review-form">
           <el-form-item label="评分">
             <el-input-number v-model="reviewForm.score" :min="0" :max="100" />
           </el-form-item>
           <el-form-item label="处理结果">
             <el-radio-group v-model="reviewForm.action">
               <el-radio-button label="REVIEWED">通过</el-radio-button>
-              <el-radio-button label="REVISION_REQUIRED">需修改</el-radio-button>
+              <el-radio-button label="REVISION_REQUIRED">需修订</el-radio-button>
             </el-radio-group>
           </el-form-item>
           <el-form-item label="评语">
@@ -319,15 +246,15 @@
               v-model="reviewForm.commentText"
               type="textarea"
               :rows="4"
-              placeholder="填写评分说明、扣分点和修改建议"
+              placeholder="填写批改意见、扣分说明等"
             />
           </el-form-item>
-          <el-form-item v-if="reviewForm.action === 'REVISION_REQUIRED'" label="修改要求">
+          <el-form-item label="修订要求" v-if="reviewForm.action === 'REVISION_REQUIRED'">
             <el-input
               v-model="reviewForm.revisionRequirement"
               type="textarea"
               :rows="3"
-              placeholder="明确指出学生需要补充或修改的内容"
+              placeholder="明确指出需要修改的内容"
             />
           </el-form-item>
         </el-form>
@@ -345,22 +272,20 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Warning } from '@element-plus/icons-vue'
-import {
-  analyzeReportVersion,
-  getStudentReportDashboard,
-  getTeacherReportDashboard,
-  scoreReport,
-} from '@/api/report'
-import { getUserInfo } from '@/utils/auth'
+import { getStudentReportDashboard, getTeacherReportDashboard, scoreReport } from '@/api/report'
 
 const router = useRouter()
 
-const userInfo = computed(() => getUserInfo())
+const userInfo = computed(() => {
+  try {
+    return JSON.parse(localStorage.getItem('userInfo') || '{}')
+  } catch {
+    return {}
+  }
+})
 
 const isTeacher = computed(() => ['TEACHER', 'ADMIN'].includes(userInfo.value.role))
 const loading = ref(true)
-const analyzingKey = ref('')
 const studentReports = ref([])
 const teacherTasks = ref([])
 
@@ -403,14 +328,12 @@ const studentSummary = computed(() => {
     0,
   )
   const scores = reports.map(item => item.finalScore).filter(score => score != null)
-  const avgScore = scores.length
-    ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length)
-    : '-'
+  const avg = scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length) : '-'
   return {
     reportCount: reports.length,
     versionCount,
     reviewedCount,
-    avgScore,
+    avgScore: avg,
   }
 })
 
@@ -437,27 +360,19 @@ const statusMap = {
   DRAFT: { label: '草稿', type: 'info' },
   SUBMITTED: { label: '已提交', type: 'success' },
   REVIEWED: { label: '已批改', type: 'warning' },
-  REVISION_REQUIRED: { label: '需修改', type: 'danger' },
+  REVISION_REQUIRED: { label: '需修订', type: 'danger' },
   UNSUBMITTED: { label: '未提交', type: 'info' },
 }
 
 const reviewMap = {
   REVIEWED: { label: '已批改', type: 'success' },
-  REVISION_REQUIRED: { label: '需修改', type: 'danger' },
-}
-
-const riskMap = {
-  LOW: { label: '低风险', type: 'success' },
-  MEDIUM: { label: '中风险', type: 'warning' },
-  HIGH: { label: '高风险', type: 'danger' },
+  REVISION_REQUIRED: { label: '需修订', type: 'danger' },
 }
 
 const statusLabel = status => statusMap[status]?.label || status || '-'
 const statusTagType = status => statusMap[status]?.type || 'info'
 const reviewLabel = action => reviewMap[action]?.label || '未批改'
 const reviewTagType = action => reviewMap[action]?.type || 'info'
-const riskLabel = level => riskMap[level]?.label || '待判断'
-const riskTagType = level => riskMap[level]?.type || 'info'
 
 const fmt = value => {
   if (!value) return ''
@@ -472,38 +387,6 @@ const fmt = value => {
   })
 }
 
-const parseAiResult = version => {
-  if (version?.aiResult && typeof version.aiResult === 'object') {
-    return version.aiResult
-  }
-  if (!version?.aiResultJson || typeof version.aiResultJson !== 'string') {
-    return {}
-  }
-  try {
-    return JSON.parse(version.aiResultJson)
-  } catch {
-    return {}
-  }
-}
-
-const versionRiskLevel = version => {
-  const aiResult = parseAiResult(version)
-  if (aiResult?.riskLevel) return aiResult.riskLevel
-  if (version?.aiRiskLevel) return version.aiRiskLevel
-  const score = Number(version?.aiRiskScore)
-  if (!Number.isFinite(score)) return ''
-  if (score >= 75) return 'HIGH'
-  if (score >= 45) return 'MEDIUM'
-  return 'LOW'
-}
-
-const aiSummary = version => {
-  const aiResult = parseAiResult(version)
-  return aiResult?.summary || ''
-}
-
-const getAnalyzeKey = (reportId, reportVersionId) => `${reportId || ''}-${reportVersionId || ''}`
-
 const goSubmit = experimentId => {
   router.push(`/experiment/${experimentId}/submit`)
 }
@@ -513,7 +396,7 @@ const goReviewDetail = (reportId, reportVersionId) => {
 }
 
 const goExperimentList = () => {
-  ElMessage.info('请从左侧“实验”模块进入具体实验后继续编辑和提交。')
+  ElMessage.info('请从左侧“实验”模块进入具体实验后提交报告')
 }
 
 const openReviewDialog = (task, student, version) => {
@@ -527,33 +410,10 @@ const openReviewDialog = (task, student, version) => {
   reviewForm.revisionRequirement = version.revisionRequirement || ''
 }
 
-const runVersionAnalysis = async (reportId, reportVersionId, syncDialog = false) => {
-  if (!reportId || !reportVersionId) return
-  const key = getAnalyzeKey(reportId, reportVersionId)
-  analyzingKey.value = key
-  try {
-    const detail = await analyzeReportVersion(reportId, reportVersionId)
-    ElMessage.success('AI 风险检测已完成')
-
-    if (syncDialog && reviewDialog.version?.reportVersionId === reportVersionId) {
-      reviewDialog.version = {
-        ...reviewDialog.version,
-        aiRiskScore: detail.aiRiskScore,
-        aiResult: detail.aiResult,
-        aiResultJson: detail.aiResultJson,
-      }
-    }
-
-    await loadData()
-  } finally {
-    analyzingKey.value = ''
-  }
-}
-
 const submitReview = async () => {
   if (!reviewDialog.student?.reportId || !reviewDialog.version?.reportVersionId) return
   if (!reviewForm.commentText?.trim()) {
-    ElMessage.warning('请先填写评语')
+    ElMessage.warning('请填写评语')
     return
   }
   reviewSubmitting.value = true
@@ -564,10 +424,9 @@ const submitReview = async () => {
       score: reviewForm.score,
       commentText: reviewForm.commentText,
       action: reviewForm.action,
-      revisionRequirement:
-        reviewForm.action === 'REVISION_REQUIRED' ? reviewForm.revisionRequirement : '',
+      revisionRequirement: reviewForm.action === 'REVISION_REQUIRED' ? reviewForm.revisionRequirement : '',
     })
-    ElMessage.success('批改结果已提交')
+    ElMessage.success('批改已提交')
     reviewDialog.visible = false
     await loadData()
   } finally {
@@ -587,38 +446,29 @@ const submitReview = async () => {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
-  padding: 28px 30px;
-  border-radius: 26px;
+  gap: 16px;
+  padding: 24px 28px;
+  border-radius: 24px;
   background:
     radial-gradient(circle at top right, rgba(255, 255, 255, 0.2), transparent 28%),
-    linear-gradient(135deg, #0f3d4d 0%, #1c6b7d 52%, #52a6b8 100%);
+    linear-gradient(135deg, #183153 0%, #27548a 55%, #4f86c6 100%);
   color: #fff;
 }
 
-.hero-eyebrow {
+.page-title {
   margin: 0 0 8px;
-  font-size: 13px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.72);
+  font-size: 28px;
+  font-weight: 700;
 }
 
-.hero-title {
-  margin: 0 0 8px;
-  font-size: 30px;
-  line-height: 1.2;
-}
-
-.hero-desc {
+.page-desc {
   margin: 0;
-  max-width: 720px;
-  color: rgba(255, 255, 255, 0.84);
-  line-height: 1.7;
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.82);
 }
 
 .loading-wrap {
-  padding: 12px 0;
+  padding: 16px 0;
 }
 
 .stats-grid {
@@ -628,76 +478,75 @@ const submitReview = async () => {
 }
 
 .stats-card {
-  min-height: 112px;
-  padding: 20px 22px;
+  padding: 18px 20px;
   border-radius: 20px;
   color: #fff;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.1);
+  gap: 8px;
+  min-height: 108px;
+  box-shadow: 0 14px 30px rgba(24, 49, 83, 0.12);
 }
 
-.stats-card span {
+.stats-card.primary { background: linear-gradient(135deg, #0f766e, #14b8a6); }
+.stats-card.success { background: linear-gradient(135deg, #1d4ed8, #3b82f6); }
+.stats-card.warning { background: linear-gradient(135deg, #c2410c, #fb923c); }
+.stats-card.danger { background: linear-gradient(135deg, #be123c, #fb7185); }
+.stats-card.neutral { background: linear-gradient(135deg, #334155, #64748b); }
+
+.stats-label {
   font-size: 13px;
   opacity: 0.86;
 }
 
-.stats-card strong {
-  font-size: 34px;
+.stats-value {
+  font-size: 32px;
   line-height: 1;
 }
 
-.stats-card.teal { background: linear-gradient(135deg, #0f766e, #14b8a6); }
-.stats-card.blue { background: linear-gradient(135deg, #1d4ed8, #3b82f6); }
-.stats-card.orange { background: linear-gradient(135deg, #c2410c, #fb923c); }
-.stats-card.rose { background: linear-gradient(135deg, #be123c, #fb7185); }
-.stats-card.slate { background: linear-gradient(135deg, #334155, #64748b); }
-
-.task-list {
+.teacher-task-list {
   display: flex;
   flex-direction: column;
   gap: 18px;
 }
 
 .task-card,
-.student-table,
 .report-collapse,
+.student-table,
 .report-collapse-item {
-  border-radius: 22px;
+  border-radius: 20px;
 }
 
 .task-card {
-  padding: 20px;
-  border: 1px solid #dbe9f5;
-  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 24%);
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 30%);
+  border: 1px solid #e5eef8;
+  padding: 18px;
 }
 
-.task-head {
+.task-header {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 16px;
 }
 
-.task-head h3 {
-  margin: 0 0 8px;
-  font-size: 22px;
-  color: #12324a;
+.task-title {
+  margin: 0 0 6px;
+  font-size: 20px;
+  color: #16324f;
 }
 
-.task-head p {
+.task-meta {
   margin: 0;
-  color: #708090;
+  color: #6b7b8d;
   font-size: 13px;
 }
 
 .task-tags {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 .student-table :deep(.el-table__inner-wrapper) {
@@ -711,76 +560,48 @@ const submitReview = async () => {
 }
 
 .student-cell span {
-  font-size: 12px;
   color: #7b8794;
+  font-size: 12px;
 }
 
 .expand-panel,
 .report-panel {
-  padding: 8px 8px 12px;
+  padding: 6px 8px 10px;
 }
 
-.empty-state {
-  padding: 14px 16px;
-  border-radius: 14px;
-  background: #f6f8fb;
+.empty-version {
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #f7f8fa;
   color: #8a94a6;
-}
-
-.version-collapse :deep(.el-collapse-item__header),
-.version-collapse :deep(.el-collapse-item__wrap),
-.report-collapse :deep(.el-collapse-item__header),
-.report-collapse :deep(.el-collapse-item__wrap) {
-  background: transparent;
 }
 
 .version-title {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  color: #1f2937;
+  color: #243b53;
 }
 
 .version-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding-top: 10px;
+  padding-top: 8px;
 }
 
 .version-summary,
 .report-overview,
 .dialog-summary {
   display: flex;
-  flex-wrap: wrap;
   gap: 14px;
+  flex-wrap: wrap;
   color: #52606d;
   font-size: 13px;
 }
 
-.ai-summary,
-.dialog-ai-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px 14px;
-  border-radius: 14px;
-  background: #fff7ed;
-  color: #9a3412;
-}
-
-.dialog-ai-bar {
-  justify-content: space-between;
-  flex-wrap: wrap;
-}
-
-.dialog-ai-text {
-  flex: 1;
-  min-width: 220px;
-}
-
-.info-box {
+.review-box {
   padding: 12px 14px;
   border-radius: 14px;
   background: #eff6ff;
@@ -788,7 +609,7 @@ const submitReview = async () => {
   line-height: 1.7;
 }
 
-.info-box.revision {
+.review-box.revision {
   background: #fff1f2;
   color: #9f1239;
 }
@@ -811,8 +632,18 @@ const submitReview = async () => {
 .version-actions {
   display: flex;
   justify-content: flex-end;
-  flex-wrap: wrap;
-  gap: 10px;
+}
+
+.report-collapse :deep(.el-collapse-item__wrap),
+.report-collapse :deep(.el-collapse-item__header),
+.expand-panel :deep(.el-collapse-item__wrap),
+.expand-panel :deep(.el-collapse-item__header) {
+  background: transparent;
+}
+
+.report-collapse :deep(.el-collapse-item__header) {
+  min-height: 88px;
+  padding: 0 6px;
 }
 
 .report-title-row {
@@ -835,8 +666,25 @@ const submitReview = async () => {
   gap: 14px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.report-title-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
   color: #52606d;
   font-size: 13px;
+}
+
+.review-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-form {
+  padding-top: 8px;
 }
 
 .student-version-list {
@@ -851,7 +699,7 @@ const submitReview = async () => {
   justify-content: space-between;
   gap: 16px;
   padding: 14px 16px;
-  border: 1px solid #e4ecf5;
+  border: 1px solid #e5edf5;
   border-radius: 16px;
   background: #fbfdff;
 }
@@ -863,31 +711,15 @@ const submitReview = async () => {
   min-width: 0;
 }
 
-.student-ai-summary {
-  margin: 0;
-  color: #9a3412;
-  font-size: 13px;
-}
-
-.review-dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.review-form {
-  padding-top: 8px;
-}
-
 @media (max-width: 1100px) {
   .stats-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .page-hero,
-  .task-head,
+  .task-header,
   .report-title-row,
-  .report-title-side {
+  .report-title-side,
+  .page-hero {
     flex-direction: column;
   }
 }

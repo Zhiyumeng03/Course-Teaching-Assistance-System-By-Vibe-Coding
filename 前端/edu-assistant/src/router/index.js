@@ -1,7 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AuthView from '@/views/AuthView.vue'
 import HomeView from '@/views/HomeView.vue'
-import { getToken, getUserInfo } from '@/utils/auth'
+import { getToken } from '@/utils/auth'
+import { getUserInfo } from '@/utils/auth'
 
 const routes = [
   {
@@ -18,7 +19,7 @@ const routes = [
     path: '/home',
     name: 'Home',
     component: HomeView,
-    meta: { title: '知予萌 - 课程教学辅助系统', requiresAuth: true }
+    meta: { title: ' - 课程教学辅助系统', requiresAuth: true }
   },
   {
     path: '/course/:id',
@@ -62,26 +63,11 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes
 })
+const userInfo = computed(() => getUserInfo() || {});
 
 // 全局路由守卫：处理页面标题 & 登录拦截
-function resolveHomeTitle() {
-  const userInfo = getUserInfo()
-  const realName = userInfo?.realName?.trim()
-  const username = userInfo?.username?.trim()
-
-  if (realName) {
-    return `${realName} - 课程教学辅助系统`
-  }
-  if (username) {
-    return `${username} - 课程教学辅助系统`
-  }
-  return '课程教学辅助系统'
-}
-
 router.beforeEach((to, from, next) => {
-  if (to.name === 'Home') {
-    document.title = resolveHomeTitle()
-  } else if (to.meta?.title) {
+  if (to.meta?.title) {
     document.title = to.meta.title
   }
   const token = getToken()
