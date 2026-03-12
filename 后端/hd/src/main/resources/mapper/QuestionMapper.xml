@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zym.hd.QuestionBank.mapper.QuestionMapper">
+
+    <sql id="AccessibleQuestionCondition">
+        q.course_id = #{courseId}
+        AND q.deleted = 0
+        <if test="viewerRole != 'TEACHER' and viewerRole != 'ADMIN'">
+            AND (
+                (
+                    q.review_status = 'APPROVED'
+                    AND (q.visibility IS NULL OR q.visibility != 'false')
+                )
+                OR q.creator_id = #{viewerId}
+            )
+        </if>
+    </sql>
+
+    <sql id="QuestionKeywordCondition">
+        <if test="keyword != null and keyword != ''">
+            AND (
+                q.stem LIKE CONCAT('%', #{keyword}, '%')
+                OR q.analysis_text LIKE CONCAT('%', #{keyword}, '%')
+                OR q.content_json LIKE CONCAT('%', #{keyword}, '%')
+                OR q.answer_json LIKE CONCAT('%', #{keyword}, '%')
+                OR EXISTS (
+                    SELECT 1
+                    FROM t_question_kp_rel rel
+                    JOIN t_knowledge_point kp ON kp.id = rel.knowledge_point_id
+                    WHERE rel.question_id = q.id
+                    AND kp.name LIKE CONCAT('%', #{keyword}, '%')
+                )
+            )
+        </if>
+    </sql>
+
+    <select id="selectPageRecords" resultType="com.zym.hd.QuestionBank.entity.QuestionEntity">
+        SELECT q.*
+        FROM t_question q
+        WHERE
+        <include refid="AccessibleQuestionCondition"/>
+        <if test="type != null and type != ''">
+            AND q.type = #{type}
+        </if>
+        <if test="reviewStatus != null and reviewStatus != ''">
+            AND q.review_status = #{reviewStatus}
+        </if>
+        <include refid="QuestionKeywordCondition"/>
+        ORDER BY q.created_at DESC, q.id DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countPageRecords" resultType="long">
+        SELECT COUNT(1)
+        FROM t_question q
+        WHERE
+        <include refid="AccessibleQuestionCondition"/>
+        <if test="type != null and type != ''">
+            AND q.type = #{type}
+        </if>
+        <if test="reviewStatus != null and reviewStatus != ''">
+            AND q.review_status = #{reviewStatus}
+        </if>
+        <include refid="QuestionKeywordCondition"/>
+    </select>
+
+    <select id="selectQuestionStats" resultType="com.zym.hd.QuestionBank.dto.QuestionStatsDTO">
+        SELECT
+            COALESCE(SUM(CASE WHEN q.review_status = 'APPROVED' THEN 1 ELSE 0 END), 0) AS approvedCount,
+            COALESCE(SUM(CASE WHEN q.review_status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pendingCount,
+            COALESCE(SUM(CASE WHEN q.review_status = 'PENDING' AND q.creator_role = 'STUDENT' THEN 1 ELSE 0 END), 0) AS pendingReviewCount
+        FROM t_question q
+        WHERE
+        <include refid="AccessibleQuestionCondition"/>
+    </select>
+
+    <select id="selectPendingReviewQuestions" resultType="com.zym.hd.QuestionBank.entity.QuestionEntity">
+        SELECT q.*
+        FROM t_question q
+        WHERE q.course_id = #{courseId}
+          AND q.deleted = 0
+          AND q.review_status = 'PENDING'
+          AND q.creator_role = 'STUDENT'
+        ORDER BY q.created_at DESC, q.id DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

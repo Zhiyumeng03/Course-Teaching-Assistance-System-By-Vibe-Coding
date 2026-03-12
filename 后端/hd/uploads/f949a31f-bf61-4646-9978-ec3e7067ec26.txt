@@ -1,0 +1,428 @@
+<template>
+  <div class="experiment-list">
+    <!-- 页面头部 -->
+    <div class="page-header">
+      <h2>我的实验</h2>
+      <el-tag type="info" size="large">
+        共 {{ totalExperiments }} 个实验
+      </el-tag>
+    </div>
+
+    <!-- 统计卡片 -->
+    <el-row :gutter="20" class="stats-row">
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="stats-card">
+          <div class="stats-item">
+            <div class="stats-icon" style="background-color: #67c23a20;">
+              <el-icon size="24" color="#67c23a"><CircleCheck /></el-icon>
+            </div>
+            <div class="stats-content">
+              <div class="stats-value">{{ statistics.completed }}</div>
+              <div class="stats-label">已完成</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="stats-card">
+          <div class="stats-item">
+            <div class="stats-icon" style="background-color: #409eff20;">
+              <el-icon size="24" color="#409eff"><Clock /></el-icon>
+            </div>
+            <div class="stats-content">
+              <div class="stats-value">{{ statistics.ongoing }}</div>
+              <div class="stats-label">进行中</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="stats-card">
+          <div class="stats-item">
+            <div class="stats-icon" style="background-color: #e6a23c20;">
+              <el-icon size="24" color="#e6a23c"><Warning /></el-icon>
+            </div>
+            <div class="stats-content">
+              <div class="stats-value">{{ statistics.pending }}</div>
+              <div class="stats-label">待开始</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :xs="24" :sm="12" :md="6">
+        <el-card class="stats-card">
+          <div class="stats-item">
+            <div class="stats-icon" style="background-color: #f56c6c20;">
+              <el-icon size="24" color="#f56c6c"><CircleClose /></el-icon>
+            </div>
+            <div class="stats-content">
+              <div class="stats-value">{{ statistics.overdue }}</div>
+              <div class="stats-label">已逾期</div>
+            </div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <!-- 筛选器 -->
+    <el-card class="filter-card">
+      <el-form :model="filterForm" inline>
+        <el-form-item label="状态">
+          <el-select v-model="filterForm.status" placeholder="全部状态" clearable style="width: 150px">
+            <el-option label="待开始" value="pending" />
+            <el-option label="进行中" value="ongoing" />
+            <el-option label="已完成" value="completed" />
+            <el-option label="已逾期" value="overdue" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="课程">
+          <el-select v-model="filterForm.course" placeholder="全部课程" clearable style="width: 150px">
+            <el-option
+              v-for="course in courseOptions"
+              :key="course.value"
+              :label="course.label"
+              :value="course.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" @click="handleSearch">
+            <el-icon><Search /></el-icon>
+            筛选
+          </el-button>
+          <el-button @click="resetFilter">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- 实验列表 -->
+    <div class="experiment-cards">
+      <el-row :gutter="20">
+        <el-col
+          v-for="experiment in experimentList"
+          :key="experiment.id"
+          :xs="24"
+          :sm="12"
+          :lg="8"
+        >
+          <el-card class="experiment-card" :class="getCardClass(experiment.status)">
+            <!-- 卡片头部 -->
+            <template #header>
+              <div class="card-header">
+                <span class="experiment-name">{{ experiment.title }}</span>
+                <el-tag :type="getStatusType(experiment.status)" size="small">
+                  {{ getStatusText(experiment.status) }}
+                </el-tag>
+              </div>
+            </template>
+
+            <!-- 卡片内容 -->
+            <div class="card-content">
+              <div class="course-info">
+                <el-icon><Reading /></el-icon>
+                <span>{{ experiment.description }}</span>
+              </div>
+
+              <div class="time-info">
+                <div class="time-item" v-if="experiment.status !== 'pending'">
+                  <span class="time-label">开始时间：</span>
+                  <span class="time-value">{{ experiment.startTime }}</span>
+                </div>
+                <div class="time-item">
+                  <span class="time-label">截止时间：</span>
+                  <span class="time-value" :class="{ 'overdue': experiment.status === 'overdue' }">
+                    {{ experiment.endTime }}
+                  </span>
+                </div>
+              </div>
+
+
+              <div class="requirement-preview">
+                {{ experiment.requirement }}
+              </div>
+            </div>
+
+            <!-- 卡底部操作 -->
+            <div class="card-footer">
+              <el-button
+                v-if="experiment.status === 'pending'"
+                type="primary"
+                @click="startExperiment(experiment)"
+              >
+                开始实验
+              </el-button>
+              <el-button
+                v-else-if="experiment.status === 'ongoing'"
+                type="primary"
+                @click="continueExperiment(experiment)"
+              >
+                继续实验
+              </el-button>
+              <el-button
+                v-else-if="experiment.status === 'completed'"
+                type="success"
+                @click="viewReport(experiment)"
+              >
+                查看报告
+              </el-button>
+              <el-button
+                v-else-if="experiment.status === 'overdue'"
+                type="warning"
+                @click="viewExperiment(experiment)"
+              >
+                查看详情
+              </el-button>
+
+              <el-dropdown trigger="click" class="more-actions">
+                <el-button type="text" size="small">
+                  更多<el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item @click="viewExperiment(experiment)">
+                      <el-icon><View /></el-icon>
+                      查看详情
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="experiment.status !== 'pending'"
+                      @click="downloadMaterials(experiment)"
+                    >
+                      <el-icon><Download /></el-icon>
+                      下载资料
+                    </el-dropdown-item>
+                    <el-dropdown-item
+                      v-if="experiment.status === 'completed' || experiment.status === 'overdue'"
+                      @click="viewGrade(experiment)"
+                    >
+                      <el-icon><Medal /></el-icon>
+                      查看成绩
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <!-- 空状态 -->
+      <el-empty
+        v-if="experimentList.length === 0 && !loading"
+        description="暂无实验任务"
+      />
+    </div>
+
+    <!-- 分页 -->
+    <div class="pagination-wrapper">
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.size"
+        :page-sizes="[10, 20, 50, 100]"
+        :total="pagination.total"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleSizeChange"
+        @current-change="handleCurrentChange"
+      />
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import {
+  CircleCheck,
+  Clock,
+  Warning,
+  CircleClose,
+  Search,
+  Reading,
+  ArrowDown,
+  View,
+  Download,
+  Medal
+} from '@element-plus/icons-vue'
+import axios from '@/utils/axios'
+
+const router = useRouter()
+
+// 响应式数据
+const loading = ref(false)
+const experimentList = ref([])
+
+// 筛选表单
+const filterForm = reactive({
+  status: '',
+  course: ''
+})
+
+// 课程选项
+const courseOptions = [
+  { label: '数据结构', value: 'ds' },
+  { label: '算法设计', value: 'algo' },
+  { label: 'Web开发', value: 'web' },
+  { label: '数据库原理', value: 'db' },
+  { label: '操作系统', value: 'os' }
+]
+
+// 统计数据
+const statistics = reactive({
+  completed: 0,
+  ongoing: 0,
+  pending: 0,
+  overdue: 0
+})
+
+// 分页
+const pagination = reactive({
+  page: 1,
+  size: 20,
+  total: 0
+})
+
+// 实验总数
+const totalExperiments = computed(() => {
+  return statistics.completed + statistics.ongoing + statistics.pending + statistics.overdue
+})
+
+// 获取实验列表
+const fetchExperimentList = async () => {
+  loading.value = true
+  try {
+    const params = new URLSearchParams({
+      current: pagination.page.toString(),
+      size: pagination.size.toString()
+    })
+
+    // 添加筛选条件
+    if (filterForm.status) {
+      params.append('status', filterForm.status)
+    }
+    if (filterForm.course) {
+      params.append('course', filterForm.course)
+    }
+
+    const response = await axios.get(`/experiments?${params.toString()}`)
+    console.log(response)
+    if (response.success) {
+      // 转换后端数据格式为前端所需格式
+      experimentList.value = response.data
+      pagination.total = response.total || 0
+      console.log(experimentList.value)
+      // 更新统计数据
+      updateStatistics(experimentList.value)
+    } else {
+      ElMessage.error(response.message || '获取实验列表失败')
+    }
+  } catch (error) {
+    console.error('获取实验列表失败:', error)
+    ElMessage.error('获取实验列表失败')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 更新统计数据
+const updateStatistics = (data) => {
+  statistics.completed = data.filter(item => item.status === 'completed').length
+  statistics.ongoing = data.filter(item => item.status === 'ongoing').length
+  statistics.pending = data.filter(item => item.status === 'pending').length
+  statistics.overdue = data.filter(item => item.status === 'overdue').length
+}
+
+// 搜索/筛选
+const handleSearch = () => {
+  pagination.page = 1
+  fetchExperimentList()
+}
+
+// 重置筛选
+const resetFilter = () => {
+  Object.assign(filterForm, {
+    status: '',
+    course: ''
+  })
+  handleSearch()
+}
+
+// 分页处理
+const handleSizeChange = (val) => {
+  pagination.size = val
+  fetchExperimentList()
+}
+
+const handleCurrentChange = (val) => {
+  pagination.page = val
+  fetchExperimentList()
+}
+
+// 获取状态类型
+const getStatusType = (status) => {
+  const statusMap = {
+    pending: 'info',
+    ongoing: 'warning',
+    completed: 'success',
+    overdue: 'danger'
+  }
+  return statusMap[status] || 'info'
+}
+
+// 获取状态文本
+const getStatusText = (status) => {
+  const statusMap = {
+    pending: '待开始',
+    ongoing: '进行中',
+    completed: '已完成',
+    overdue: '已逾期'
+  }
+  return statusMap[status] || '未知'
+}
+
+// 获取卡片样式类
+const getCardClass = (status) => {
+  return `card-${status}`
+}
+
+// 获取进度条状态
+const getProgressStatus = (experiment) => {
+  if (experiment.status === 'completed') return 'success'
+  if (experiment.status === 'overdue') return 'exception'
+  return null
+}
+
+// 开始实验
+const startExperiment = (experiment) => {
+  router.push(`/student/experiments/${experiment.id}`)
+}
+
+// 继续实验
+const continueExperiment = (experiment) => {
+  router.push(`/student/experiments/${experiment.id}/report`)
+}
+
+// 查看报告
+const viewReport = (experiment) => {
+  router.push(`/student/reports/${experiment.id}`)
+}
+
+// 查看实验详情
+const viewExperiment = (experiment) => {
+  router.push(`/student/experiments/${experiment.id}`)
+}
+
+// 下载资料
+const downloadMaterials = (experiment) => {
+  ElMessage.info('正在下载实验资料...')
+  // TODO: 实现文件下载
+}
+
+// 查看成绩
+const viewGrade = (experiment) => {
+  router.push(`/student/experiments/${experiment.id}/grade`)
+}
+
+// 组件挂载时获取数据
+onMounted(() => {
+  fetchExperimentList()
+})

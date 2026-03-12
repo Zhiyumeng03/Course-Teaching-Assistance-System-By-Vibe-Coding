@@ -1,0 +1,38 @@
+spring:
+  profiles:
+    active: dev   # 开发阶段：鉴权宽松；上线前改为 prod
+  datasource:
+    url: jdbc:mysql://localhost:3306/course_assist
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+mybatis-plus:
+  mapper-locations: classpath:/mapper/*.xml
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+oss:
+  bucket: ${OSS_BUCKET:zym-bysj}
+  region: ${OSS_REGION:cn-shenzhen}
+  endpoint: ${OSS_ENDPOINT:}
+  access-key-id: ${OSS_ACCESS_KEY_ID:}
+  access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+
+ai:
+  question:
+    enabled: ${AI_QUESTION_ENABLED:true}
+    python-base-url: ${AI_QUESTION_PYTHON_BASE_URL:http://localhost:8001}
+    connect-timeout-ms: ${AI_QUESTION_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${AI_QUESTION_READ_TIMEOUT_MS:60000}
+    max-count: ${AI_QUESTION_MAX_COUNT:10}
+  practice-diagnosis:
+    enabled: ${AI_PRACTICE_DIAGNOSIS_ENABLED:true}
+    python-base-url: ${AI_PRACTICE_DIAGNOSIS_PYTHON_BASE_URL:http://localhost:8002}
+    connect-timeout-ms: ${AI_PRACTICE_DIAGNOSIS_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${AI_PRACTICE_DIAGNOSIS_READ_TIMEOUT_MS:60000}
+  report-detection:
+    enabled: ${AI_REPORT_DETECTION_ENABLED:true}
+    python-base-url: ${AI_REPORT_DETECTION_PYTHON_BASE_URL:http://localhost:8003}
+    connect-timeout-ms: ${AI_REPORT_DETECTION_CONNECT_TIMEOUT_MS:3000}
+    read-timeout-ms: ${AI_REPORT_DETECTION_READ_TIMEOUT_MS:120000}
