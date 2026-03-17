@@ -32,6 +32,21 @@ public class Course {
     @TableField("join_code")
     private String joinCode;
 
+    @TableField("enroll_mode")
+    private String enrollMode;
+
+    @TableField("enroll_capacity")
+    private Integer enrollCapacity;
+
+    @TableField("enroll_start_at")
+    private LocalDateTime enrollStartAt;
+
+    @TableField("enroll_end_at")
+    private LocalDateTime enrollEndAt;
+
+    @TableField("enroll_preheated_at")
+    private LocalDateTime enrollPreheatedAt;
+
     @TableField("status")
     private String status;
 
@@ -44,4 +59,3 @@ public class Course {
     @TableField("deleted")
     private Integer deleted;
 }
-

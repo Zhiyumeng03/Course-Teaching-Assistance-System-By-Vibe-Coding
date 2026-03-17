@@ -6,6 +6,19 @@ spring:
     username: root
     password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 192.168.207.128
+      port: 6379
+      password: 526228585s
+      timeout: 100
+      lettuce:
+        pool:
+          max-active: 32
+          max-idle: 32
+          max-wait: 10000
+          min-idle: 0
+
 
 mybatis-plus:
   mapper-locations: classpath:/mapper/*.xml
@@ -36,3 +49,9 @@ ai:
     python-base-url: ${AI_REPORT_DETECTION_PYTHON_BASE_URL:http://localhost:8003}
     connect-timeout-ms: ${AI_REPORT_DETECTION_CONNECT_TIMEOUT_MS:3000}
     read-timeout-ms: ${AI_REPORT_DETECTION_READ_TIMEOUT_MS:120000}
+
+demo:
+  rocketmq:
+    enabled: ${DEMO_ROCKETMQ_ENABLED:false}
+    request-topic: ${DEMO_ROCKETMQ_REQUEST_TOPIC:course-demo-topic}
+    reply-topic: ${DEMO_ROCKETMQ_REPLY_TOPIC:course-demo-reply-topic}

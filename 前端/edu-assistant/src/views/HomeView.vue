@@ -352,6 +352,7 @@ import {
   getHomeDashboard,
   markDashboardNotificationRead,
   getProfile,
+  logout as logoutApi,
   updateUser,
   uploadAvatar,
 } from "@/api/user";
@@ -762,6 +763,7 @@ async function logout() {
     await ElMessageBox.confirm("确定要退出当前账号吗？", "退出登录", {
       type: "warning",
     });
+    await logoutApi().catch(() => {});
     clearAuthSession();
     router.push("/login");
   } catch {}

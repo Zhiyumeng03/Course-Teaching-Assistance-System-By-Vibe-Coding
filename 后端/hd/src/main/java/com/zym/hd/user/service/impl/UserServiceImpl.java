@@ -18,6 +18,7 @@ import com.zym.hd.report.vo.ReportVersionItemVO;
 import com.zym.hd.report.vo.StudentReportItemVO;
 import com.zym.hd.report.vo.TeacherReportStudentVO;
 import com.zym.hd.report.vo.TeacherReportTaskVO;
+import com.zym.hd.security.JwtTokenService;
 import com.zym.hd.user.dto.UserHomeDashboardDTO;
 import com.zym.hd.user.dto.UserHomeNotificationDTO;
 import com.zym.hd.user.entity.UserNotificationReadEntity;
@@ -35,9 +36,15 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.core.env.Environment;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -47,9 +54,24 @@ import org.springframework.util.StringUtils;
 @Service
 public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> implements UserService {
 
+    private static final Logger log = LoggerFactory.getLogger(UserServiceImpl.class);
     private static final String ROLE_STUDENT = "STUDENT";
     private static final String ROLE_TEACHER = "TEACHER";
     private static final String ROLE_ADMIN = "ADMIN";
+    private static final String SMS_SCENE_LOGIN = "LOGIN";
+    private static final String SMS_SCENE_REGISTER = "REGISTER";
+    private static final String SMS_CODE_KEY_PREFIX = "auth:sms:code:";
+    private static final String SMS_COOLDOWN_KEY_PREFIX = "auth:sms:cooldown:";
+    private static final String SMS_FAIL_KEY_PREFIX = "auth:sms:fail:";
+    private static final String SMS_DAILY_KEY_PREFIX = "auth:sms:daily:";
+    private static final String SESSION_KEY_PREFIX = "auth:session:";
+    private static final long SMS_CODE_TTL_MINUTES = 5L;
+    private static final long SMS_COOLDOWN_SECONDS = 60L;
+    private static final long SMS_FAIL_LOCK_MINUTES = 10L;
+    private static final int SMS_FAIL_LIMIT = 5;
+    private static final int SMS_DAILY_LIMIT = 10;
+    private static final long SESSION_TTL_MINUTES = 30L;
+    private static final String TEMP_STUDENT_NO_PREFIX = "PT";
     private static final String MEMBER_ROLE_STUDENT = "STUDENT";
     private static final String MEMBER_ROLE_PENDING = "STUDENT under review";
     private static final String REPORT_STATUS_SUBMITTED = "SUBMITTED";
@@ -71,6 +93,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
     private final UserNotificationReadService userNotificationReadService;
     private final CourseMapper courseMapper;
     private final ExperimentMapper experimentMapper;
+    private final RedisTemplate<String, Object> redisTemplate;
+    private final JwtTokenService jwtTokenService;
+    private final Environment environment;
+    private final Random random = new Random();
 
     public UserServiceImpl(CourseService courseService,
                            CourseMemberService courseMemberService,
@@ -80,7 +106,10 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
                            @Lazy PracticeService practiceService,
                            UserNotificationReadService userNotificationReadService,
                            CourseMapper courseMapper,
-                           ExperimentMapper experimentMapper) {
+                           ExperimentMapper experimentMapper,
+                           RedisTemplate<String, Object> redisTemplate,
+                           JwtTokenService jwtTokenService,
+                           Environment environment) {
         this.courseService = courseService;
         this.courseMemberService = courseMemberService;
         this.experimentService = experimentService;
@@ -90,29 +119,36 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         this.userNotificationReadService = userNotificationReadService;
         this.courseMapper = courseMapper;
         this.experimentMapper = experimentMapper;
+        this.redisTemplate = redisTemplate;
+        this.jwtTokenService = jwtTokenService;
+        this.environment = environment;
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public UserEntity register(UserEntity user, String rawPassword) {
+    public UserEntity register(UserEntity user, String rawPassword, String smsCode) {
         if (user == null) {
             throw new IllegalArgumentException("user is required");
         }
         String username = normalizeRequired(user.getUsername(), "username");
         String role = normalizeRole(user.getRole());
+        String phone = normalizeRequired(user.getPhone(), "phone");
+        validateChinaPhone(phone);
+        validateSmsCode(phone, SMS_SCENE_REGISTER, smsCode, true);
         if (!StringUtils.hasText(rawPassword) || rawPassword.trim().length() < 6) {
             throw new IllegalArgumentException("password must be at least 6 characters");
         }
         if (lambdaQuery().eq(UserEntity::getUsername, username).eq(UserEntity::getDeleted, 0).count() > 0) {
             throw new IllegalArgumentException("username already exists");
         }
+        ensureUniquePhone(phone, null);
 
         UserEntity entity = new UserEntity();
         entity.setUsername(username);
         entity.setRole(role);
         entity.setRealName(normalizeRequired(user.getRealName(), "realName"));
         entity.setEmail(normalizeNullable(user.getEmail()));
-        entity.setPhone(normalizeNullable(user.getPhone()));
+        entity.setPhone(phone);
         entity.setAvatarUrl(normalizeNullable(user.getAvatarUrl()));
         entity.setStatus(1);
         entity.setDeleted(0);
@@ -135,7 +171,45 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
             entity.setTeacherNo(normalizeNullable(user.getTeacherNo()));
         }
 
-        save(entity);
+        try {
+            save(entity);
+        } catch (DuplicateKeyException e) {
+            throw new IllegalArgumentException("电话号码已存在");
+        }
+        return sanitizeUser(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserEntity registerTempPressureUser(String username, String rawPassword) {
+        String normalizedUsername = normalizeRequired(username, "username");
+        if (!StringUtils.hasText(rawPassword) || rawPassword.trim().length() < 6) {
+            throw new IllegalArgumentException("password must be at least 6 characters");
+        }
+        if (lambdaQuery().eq(UserEntity::getUsername, normalizedUsername).eq(UserEntity::getDeleted, 0).count() > 0) {
+            throw new IllegalArgumentException("username already exists");
+        }
+
+        UserEntity entity = new UserEntity();
+        entity.setUsername(normalizedUsername);
+        entity.setRole(ROLE_STUDENT);
+        entity.setRealName("PT_" + normalizedUsername);
+        entity.setStudentNo(generatePressureStudentNo());
+        entity.setTeacherNo(null);
+        entity.setEmail(null);
+        entity.setPhone(null);
+        entity.setAvatarUrl(null);
+        entity.setStatus(1);
+        entity.setDeleted(0);
+        entity.setCreatedAt(LocalDateTime.now());
+        entity.setUpdatedAt(LocalDateTime.now());
+        entity.setPasswordHash(passwordEncoder.encode(rawPassword.trim()));
+
+        try {
+            save(entity);
+        } catch (DuplicateKeyException e) {
+            throw new IllegalArgumentException("username already exists");
+        }
         return sanitizeUser(entity);
     }
 
@@ -162,6 +236,106 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         entity.setUpdatedAt(LocalDateTime.now());
         updateById(entity);
         return sanitizeUser(entity);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public UserEntity loginByPhone(String phone, String smsCode) {
+        String normalizedPhone = normalizeRequired(phone, "phone");
+        validateChinaPhone(normalizedPhone);
+        validateSmsCode(normalizedPhone, SMS_SCENE_LOGIN, smsCode, true);
+
+        UserEntity entity = lambdaQuery()
+                .eq(UserEntity::getPhone, normalizedPhone)
+                .eq(UserEntity::getDeleted, 0)
+                .one();
+        if (entity == null) {
+            throw new IllegalArgumentException("phone is not registered");
+        }
+        if (entity.getStatus() != null && entity.getStatus() == 0) {
+            throw new IllegalArgumentException("account is disabled");
+        }
+
+        entity.setRole(normalizeRole(entity.getRole()));
+        entity.setLastLoginAt(LocalDateTime.now());
+        entity.setUpdatedAt(LocalDateTime.now());
+        updateById(entity);
+        return sanitizeUser(entity);
+    }
+
+    @Override
+    public void sendSmsCode(String phone, String scene) {
+        String normalizedPhone = normalizeRequired(phone, "phone");
+        validateChinaPhone(normalizedPhone);
+        String normalizedScene = normalizeSmsScene(scene);
+
+        String cooldownKey = smsCooldownKey(normalizedScene, normalizedPhone);
+        if (Boolean.TRUE.equals(redisTemplate.hasKey(cooldownKey))) {
+            throw new IllegalArgumentException("code requested too frequently, try again later");
+        }
+
+        String dailyKey = smsDailyKey(normalizedScene, normalizedPhone);
+        Long dailyCount = redisTemplate.opsForValue().increment(dailyKey);
+        if (dailyCount != null && dailyCount == 1L) {
+            redisTemplate.expire(dailyKey, 1, TimeUnit.DAYS);
+        }
+        if (dailyCount != null && dailyCount > SMS_DAILY_LIMIT) {
+            throw new IllegalArgumentException("daily code limit reached");
+        }
+
+        if (SMS_SCENE_LOGIN.equals(normalizedScene)) {
+            long userCount = lambdaQuery()
+                    .eq(UserEntity::getPhone, normalizedPhone)
+                    .eq(UserEntity::getDeleted, 0)
+                    .count();
+            if (userCount <= 0) {
+                throw new IllegalArgumentException("phone is not registered");
+            }
+        } else if (SMS_SCENE_REGISTER.equals(normalizedScene)) {
+            ensureUniquePhone(normalizedPhone, null);
+        }
+
+        String code = generateSmsCode();
+        redisTemplate.opsForValue().set(
+                smsCodeKey(normalizedScene, normalizedPhone),
+                code,
+                SMS_CODE_TTL_MINUTES,
+                TimeUnit.MINUTES);
+        redisTemplate.opsForValue().set(cooldownKey, "1", SMS_COOLDOWN_SECONDS, TimeUnit.SECONDS);
+        redisTemplate.delete(smsFailKey(normalizedScene, normalizedPhone));
+
+        if (isDevMode()) {
+            log.info("sms code generated scene={}, phone={}, code={}", normalizedScene, maskPhone(normalizedPhone), code);
+        } else {
+            log.info("sms code generated scene={}, phone={}", normalizedScene, maskPhone(normalizedPhone));
+        }
+    }
+
+    @Override
+    public String createLoginSessionToken(UserEntity user) {
+        if (user == null || user.getId() == null) {
+            throw new IllegalArgumentException("user is required");
+        }
+        String token = jwtTokenService.generateToken(user);
+        String digest = jwtTokenService.tokenDigest(token);
+        String sessionKey = SESSION_KEY_PREFIX + digest;
+        Map<String, Object> session = new HashMap<>();
+        session.put("userId", user.getId());
+        session.put("username", valueOrDefault(user.getUsername(), ""));
+        session.put("role", normalizeRole(user.getRole()));
+        session.put("phone", valueOrDefault(user.getPhone(), ""));
+        session.put("loginAt", LocalDateTime.now().toString());
+        redisTemplate.opsForHash().putAll(sessionKey, session);
+        redisTemplate.expire(sessionKey, SESSION_TTL_MINUTES, TimeUnit.MINUTES);
+        return token;
+    }
+
+    @Override
+    public void logoutByToken(String token) {
+        if (!StringUtils.hasText(token)) {
+            return;
+        }
+        redisTemplate.delete(SESSION_KEY_PREFIX + jwtTokenService.tokenDigest(token.trim()));
     }
 
     @Override
@@ -197,7 +371,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
             db.setEmail(normalizeNullable(user.getEmail()));
         }
         if (user.getPhone() != null) {
-            db.setPhone(normalizeNullable(user.getPhone()));
+            String phone = normalizeNullable(user.getPhone());
+            if (StringUtils.hasText(phone)) {
+                validateChinaPhone(phone);
+                ensureUniquePhone(phone, db.getId());
+            }
+            db.setPhone(phone);
         }
         if (user.getAvatarUrl() != null) {
             db.setAvatarUrl(normalizeNullable(user.getAvatarUrl()));
@@ -692,6 +871,88 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         return notifications;
     }
 
+    private void validateChinaPhone(String phone) {
+        if (!phone.matches("^1[3-9]\\d{9}$")) {
+            throw new IllegalArgumentException("phone format is invalid");
+        }
+    }
+
+    private String normalizeSmsScene(String scene) {
+        String normalized = normalizeRequired(scene, "scene").toUpperCase(Locale.ROOT);
+        if (!SMS_SCENE_LOGIN.equals(normalized) && !SMS_SCENE_REGISTER.equals(normalized)) {
+            throw new IllegalArgumentException("unsupported sms scene");
+        }
+        return normalized;
+    }
+
+    private String generateSmsCode() {
+        int value = random.nextInt(900000) + 100000;
+        return String.valueOf(value);
+    }
+
+    private void validateSmsCode(String phone, String scene, String code, boolean consumeOnSuccess) {
+        String normalizedScene = normalizeSmsScene(scene);
+        String normalizedCode = normalizeRequired(code, "code");
+        if (!normalizedCode.matches("^\\d{6}$")) {
+            throw new IllegalArgumentException("code must be 6 digits");
+        }
+
+        String failKey = smsFailKey(normalizedScene, phone);
+        String lockText = redisTemplate.opsForValue().get(failKey) == null ? null : String.valueOf(redisTemplate.opsForValue().get(failKey));
+        if (StringUtils.hasText(lockText) && lockText.startsWith("LOCK")) {
+            throw new IllegalArgumentException("code verification locked, try again later");
+        }
+
+        String codeKey = smsCodeKey(normalizedScene, phone);
+        Object expected = redisTemplate.opsForValue().get(codeKey);
+        if (expected == null || !normalizedCode.equals(String.valueOf(expected))) {
+            Long failCount = redisTemplate.opsForValue().increment(failKey);
+            if (failCount != null && failCount >= SMS_FAIL_LIMIT) {
+                redisTemplate.opsForValue().set(failKey, "LOCK", SMS_FAIL_LOCK_MINUTES, TimeUnit.MINUTES);
+                throw new IllegalArgumentException("too many failed attempts, try again in 10 minutes");
+            }
+            redisTemplate.expire(failKey, SMS_FAIL_LOCK_MINUTES, TimeUnit.MINUTES);
+            throw new IllegalArgumentException("code is incorrect or expired");
+        }
+
+        redisTemplate.delete(failKey);
+        if (consumeOnSuccess) {
+            redisTemplate.delete(codeKey);
+        }
+    }
+
+    private boolean isDevMode() {
+        for (String profile : environment.getActiveProfiles()) {
+            if ("dev".equalsIgnoreCase(profile)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String maskPhone(String phone) {
+        if (!StringUtils.hasText(phone) || phone.length() < 7) {
+            return phone;
+        }
+        return phone.substring(0, 3) + "****" + phone.substring(phone.length() - 4);
+    }
+
+    private String smsCodeKey(String scene, String phone) {
+        return SMS_CODE_KEY_PREFIX + scene + ":" + phone;
+    }
+
+    private String smsCooldownKey(String scene, String phone) {
+        return SMS_COOLDOWN_KEY_PREFIX + scene + ":" + phone;
+    }
+
+    private String smsFailKey(String scene, String phone) {
+        return SMS_FAIL_KEY_PREFIX + scene + ":" + phone;
+    }
+
+    private String smsDailyKey(String scene, String phone) {
+        return SMS_DAILY_KEY_PREFIX + scene + ":" + phone;
+    }
+
     private void ensureUniqueStudentNo(String studentNo, Long selfId) {
         if (!StringUtils.hasText(studentNo)) {
             return;
@@ -716,6 +977,36 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, UserEntity> impleme
         if (existing != null && !Objects.equals(existing.getId(), selfId)) {
             throw new IllegalArgumentException("teacherNo already exists");
         }
+    }
+
+    private void ensureUniquePhone(String phone, Long selfId) {
+        if (!StringUtils.hasText(phone)) {
+            return;
+        }
+        UserEntity existing = lambdaQuery()
+                .eq(UserEntity::getPhone, phone)
+                .eq(UserEntity::getDeleted, 0)
+                .one();
+        if (existing != null && !Objects.equals(existing.getId(), selfId)) {
+            throw new IllegalArgumentException("电话号码已存在");
+        }
+    }
+
+    private String generatePressureStudentNo() {
+        for (int i = 0; i < 10; i++) {
+            String candidate = TEMP_STUDENT_NO_PREFIX + System.currentTimeMillis() + (1000 + random.nextInt(9000));
+            if (candidate.length() > 50) {
+                candidate = candidate.substring(0, 50);
+            }
+            UserEntity existing = lambdaQuery()
+                    .eq(UserEntity::getStudentNo, candidate)
+                    .eq(UserEntity::getDeleted, 0)
+                    .one();
+            if (existing == null) {
+                return candidate;
+            }
+        }
+        throw new IllegalStateException("failed to generate unique studentNo");
     }
 
     private UserEntity sanitizeUser(UserEntity entity) {

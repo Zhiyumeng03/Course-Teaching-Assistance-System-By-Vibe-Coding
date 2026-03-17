@@ -2,9 +2,7 @@ package com.zym.hd.course.controller;
 
 import com.zym.hd.course.entity.Course;
 import com.zym.hd.course.service.CourseService;
-
 import java.util.List;
-
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,19 +18,19 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/courses")
 public class CourseController {
 
+    private static final String ENROLL_MODE_REVIEW = "REVIEW";
+
     private final CourseService courseService;
 
     public CourseController(CourseService courseService) {
         this.courseService = courseService;
     }
 
-    /** 全量列表（管理用途） */
     @GetMapping
     public List<Course> list() {
         return courseService.list();
     }
 
-    /** 按加入码查询课程（学生申请加入时使用） */
     @GetMapping("/by-join-code")
     public Course getByJoinCode(@RequestParam("joinCode") String joinCode) {
         return courseService.lambdaQuery()
@@ -49,17 +47,26 @@ public class CourseController {
     @PostMapping
     @PreAuthorize("hasAnyRole('TEACHER','ADMIN')")
     public boolean create(@RequestBody Course course) {
+        if (course.getEnrollMode() == null || course.getEnrollMode().isBlank()) {
+            course.setEnrollMode(ENROLL_MODE_REVIEW);
+        }
         return courseService.save(course);
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TEACHER','ADMIN')")
     public boolean update(@PathVariable Long id, @RequestBody Course course) {
         course.setId(id);
+        if (course.getEnrollMode() == null || course.getEnrollMode().isBlank()) {
+            course.setEnrollMode(ENROLL_MODE_REVIEW);
+        }
         return courseService.updateById(course);
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyRole('TEACHER','ADMIN')")
     public boolean delete(@PathVariable Long id) {
         return courseService.removeById(id);
     }
 }
+

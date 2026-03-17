@@ -5,10 +5,15 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import java.time.LocalDateTime;
+
+import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 
 @Data
 @TableName("t_course_member")
+@AllArgsConstructor
+@NoArgsConstructor
 public class CourseMember {
 
     @TableId(value = "id", type = IdType.AUTO)

@@ -49,7 +49,14 @@ public class SecurityConfig {
         } else {
             // ── PROD：严格鉴权 ──
             http.authorizeHttpRequests(auth -> auth
-                    .requestMatchers("/api/user/register", "/api/user/login").permitAll()
+                    .requestMatchers(
+                            "/api/user/register",
+                            "/api/user/register/temp",
+                            "/api/users/register/temp",
+                            "/api/user/login",
+                            "/api/user/login/sms",
+                            "/api/user/sms/send-code")
+                    .permitAll()
                     .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex
                     .authenticationEntryPoint((request, response, authException) -> {

@@ -26,11 +26,28 @@
             <el-tag :type="statusTagType(course.status)" effect="dark" round>
               {{ statusLabel(course.status) }}
             </el-tag>
+            <el-tag
+              v-if="course.enrollMode"
+              :type="course.enrollMode === 'SECKILL' ? 'danger' : 'info'"
+              effect="light"
+              round
+            >
+              {{ course.enrollMode === "SECKILL" ? "抢课模式" : "审批模式" }}
+            </el-tag>
           </div>
         </div>
 
         <div v-if="isTeacher" class="hero-actions">
           <el-button :icon="Edit" round @click="editDialogVisible = true">编辑课程</el-button>
+          <el-button
+            v-if="course.enrollMode === 'SECKILL'"
+            type="warning"
+            round
+            :loading="preheatLoading"
+            @click="handlePreheat"
+          >
+            预热抢课缓存
+          </el-button>
           <el-button
             :icon="Delete"
             type="danger"
@@ -41,6 +58,25 @@
           >
             删除课程
           </el-button>
+        </div>
+      </section>
+
+      <section v-if="course.enrollMode === 'SECKILL'" class="seckill-strip">
+        <div class="seckill-item">
+          <span>抢课名额</span>
+          <strong>{{ seckillStats?.enrollCapacity ?? course.enrollCapacity ?? "-" }}</strong>
+        </div>
+        <div class="seckill-item">
+          <span>已选人数</span>
+          <strong>{{ seckillStats?.enrolledCount ?? "-" }}</strong>
+        </div>
+        <div class="seckill-item">
+          <span>剩余名额</span>
+          <strong>{{ seckillStats?.remainingStock ?? "-" }}</strong>
+        </div>
+        <div class="seckill-item">
+          <span>活动状态</span>
+          <strong>{{ seckillActivityLabel(seckillStats?.activityStatus) }}</strong>
         </div>
       </section>
 
@@ -332,6 +368,40 @@
             <el-option label="已结束" value="CLOSED" />
           </el-select>
         </el-form-item>
+        <el-form-item label="入课模式">
+          <el-select v-model="editForm.enrollMode" style="width: 100%">
+            <el-option label="审批入课" value="REVIEW" />
+            <el-option label="抢课入课" value="SECKILL" />
+          </el-select>
+        </el-form-item>
+        <template v-if="editForm.enrollMode === 'SECKILL'">
+          <el-form-item label="抢课名额">
+            <el-input-number
+              v-model="editForm.enrollCapacity"
+              :min="1"
+              :max="100000"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="开始时间">
+            <el-date-picker
+              v-model="editForm.enrollStartAt"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              placeholder="选择开始时间"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="结束时间">
+            <el-date-picker
+              v-model="editForm.enrollEndAt"
+              type="datetime"
+              value-format="YYYY-MM-DDTHH:mm:ss"
+              placeholder="选择结束时间"
+              style="width: 100%"
+            />
+          </el-form-item>
+        </template>
         <el-form-item label="课程简介">
           <el-input v-model="editForm.description" type="textarea" :rows="3" />
         </el-form-item>
@@ -567,8 +637,11 @@ import {
   deleteCourse,
   getApprovedMembers,
   getCourseById,
+  getCourseSeckillStats,
   getPendingMembers,
+  preheatCourseSeckill,
   removeMember,
+  updateCourseEnrollConfig,
   updateCourse,
 } from "@/api/course";
 import { getPaperDetail, getPaperList } from "@/api/paper";
@@ -615,6 +688,8 @@ const editLoading = ref(false);
 const deleteLoading = ref(false);
 const editFormRef = ref(null);
 const editForm = ref(null);
+const preheatLoading = ref(false);
+const seckillStats = ref(null);
 
 const expLoading = ref(false);
 const courseExperiments = ref([]);
@@ -665,8 +740,12 @@ async function loadCourse() {
   try {
     course.value = await getCourseById(courseId.value);
     if (!course.value) return;
-    editForm.value = { ...course.value };
+    editForm.value = toEditableCourse(course.value);
+    seckillStats.value = null;
     await Promise.all([loadTeacherName(course.value.teacherNo), loadMembers()]);
+    if (course.value.enrollMode === "SECKILL" && isTeacher.value) {
+      await loadSeckillStats();
+    }
     if (activeTab.value === "experiments") {
       await loadCourseExperiments();
     }
@@ -728,12 +807,60 @@ function statusTagType(status) {
   return { ACTIVE: "success", PENDING: "warning", CLOSED: "info" }[status] || "";
 }
 
+async function loadSeckillStats() {
+  try {
+    seckillStats.value = await getCourseSeckillStats(courseId.value);
+  } catch {
+    seckillStats.value = null;
+  }
+}
+
+function seckillActivityLabel(status) {
+  return {
+    NOT_STARTED: "未开始",
+    ONGOING: "进行中",
+    ENDED: "已结束",
+  }[status] || "-";
+}
+
+async function handlePreheat() {
+  preheatLoading.value = true;
+  try {
+    seckillStats.value = await preheatCourseSeckill(courseId.value);
+    ElMessage.success("抢课缓存预热完成");
+  } finally {
+    preheatLoading.value = false;
+  }
+}
+
 async function handleEditCourse() {
   const valid = await editFormRef.value?.validate().catch(() => false);
   if (!valid) return;
+  if (editForm.value?.enrollMode === "SECKILL") {
+    if (!editForm.value.enrollCapacity || editForm.value.enrollCapacity <= 0) {
+      ElMessage.error("抢课名额必须大于 0");
+      return;
+    }
+    const startTs = new Date(editForm.value.enrollStartAt).getTime();
+    const endTs = new Date(editForm.value.enrollEndAt).getTime();
+    if (!startTs || !endTs || startTs >= endTs) {
+      ElMessage.error("抢课开始时间必须早于结束时间");
+      return;
+    }
+  }
   editLoading.value = true;
   try {
-    await updateCourse(courseId.value, editForm.value);
+    const payload = toCourseUpdatePayload(editForm.value);
+    await updateCourse(courseId.value, payload);
+    await updateCourseEnrollConfig(courseId.value, {
+      enrollMode: payload.enrollMode,
+      enrollCapacity: payload.enrollMode === "SECKILL" ? payload.enrollCapacity : null,
+      enrollStartAt: payload.enrollMode === "SECKILL" ? payload.enrollStartAt : null,
+      enrollEndAt: payload.enrollMode === "SECKILL" ? payload.enrollEndAt : null,
+    });
+    if (payload.enrollMode === "SECKILL") {
+      await loadSeckillStats();
+    }
     ElMessage.success("课程信息更新成功");
     editDialogVisible.value = false;
     await loadCourse();
@@ -1013,6 +1140,46 @@ function quizPreviewCanSeeAnalysis(question) {
   return quizPreviewShowReference.value && !!getQuizQuestionAnalysis(question);
 }
 
+function toEditableCourse(source) {
+  return {
+    ...source,
+    enrollMode: source?.enrollMode || "REVIEW",
+    enrollCapacity: source?.enrollCapacity ?? 50,
+    enrollStartAt: toLocalDateTimeValue(source?.enrollStartAt),
+    enrollEndAt: toLocalDateTimeValue(source?.enrollEndAt),
+  };
+}
+
+function toCourseUpdatePayload(source) {
+  const payload = {
+    ...source,
+    enrollMode: source?.enrollMode || "REVIEW",
+    enrollCapacity: source?.enrollCapacity ?? null,
+    enrollStartAt: toLocalDateTimeValue(source?.enrollStartAt),
+    enrollEndAt: toLocalDateTimeValue(source?.enrollEndAt),
+  };
+  if (payload.enrollMode !== "SECKILL") {
+    payload.enrollCapacity = null;
+    payload.enrollStartAt = null;
+    payload.enrollEndAt = null;
+  }
+  return payload;
+}
+
+function toLocalDateTimeValue(value) {
+  if (!value) return "";
+  if (Array.isArray(value)) {
+    const [year, month, day, hour = 0, minute = 0, second = 0] = value;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:${String(second).padStart(2, "0")}`;
+  }
+  if (typeof value === "string") {
+    return value.includes("T") ? value.slice(0, 19) : value.replace(" ", "T").slice(0, 19);
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toISOString().slice(0, 19);
+}
+
 function formatDate(value) {
   if (!value) return "-";
   const date = new Date(Array.isArray(value) ? value.join("-") : value);
@@ -1143,6 +1310,36 @@ onMounted(loadCourse);
   flex-wrap: wrap;
   flex-shrink: 0;
   padding-top: 4px;
+}
+
+.seckill-strip {
+  margin: 14px 32px 0;
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+  padding: 14px 18px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.seckill-item {
+  background: #f6f8fe;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.seckill-item span {
+  font-size: 12px;
+  color: #7f8ba1;
+}
+
+.seckill-item strong {
+  font-size: 16px;
+  color: #1a1a2e;
 }
 
 .tab-nav {
@@ -1488,6 +1685,10 @@ onMounted(loadCourse);
     flex-direction: column;
   }
 
+  .seckill-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .preview-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -1517,6 +1718,11 @@ onMounted(loadCourse);
   .hero-banner {
     margin: 10px 12px 0;
     padding: 24px 20px;
+  }
+
+  .seckill-strip {
+    margin: 10px 12px 0;
+    grid-template-columns: 1fr;
   }
 
   .tab-nav {

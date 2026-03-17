@@ -3,6 +3,7 @@ package com.zym.hd.security;
 import com.zym.hd.user.entity.UserEntity;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.Locale;
@@ -20,16 +21,19 @@ public class JwtTokenService {
     private static final String JWT_ALG = "HS256";
     private static final long EXPIRE_SECONDS = 24 * 60 * 60;
     private static final String SECRET = "change-this-to-your-production-secret-key";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     public String generateToken(UserEntity user) {
         long now = Instant.now().getEpochSecond();
         long exp = now + EXPIRE_SECONDS;
+        String jti = randomJti();
 
         try {
             String headerJson = "{\"typ\":\"" + JWT_TYP + "\",\"alg\":\"" + JWT_ALG + "\"}";
             String payloadJson = "{\"uid\":" + user.getId()
                     + ",\"sub\":\"" + escapeJson(user.getUsername())
                     + "\",\"role\":\"" + escapeJson(normalizeRole(user.getRole()))
+                    + "\",\"jti\":\"" + jti
                     + "\",\"iat\":" + now
                     + ",\"exp\":" + exp + "}";
             String headerPart = base64Url(headerJson.getBytes(StandardCharsets.UTF_8));
@@ -70,12 +74,30 @@ public class JwtTokenService {
             Long uid = extractLong(payload, "uid");
             String username = extractString(payload, "sub");
             String role = normalizeRole(extractString(payload, "role"));
-            if (uid == null || username == null || role == null) {
+            String jti = extractString(payload, "jti");
+            if (uid == null || username == null || role == null || jti == null) {
                 throw new IllegalArgumentException("token payload invalid");
             }
-            return new LoginUser(uid, username, role);
+            return new LoginUser(uid, username, role, jti);
         } catch (Exception e) {
             throw new IllegalArgumentException("token invalid", e);
+        }
+    }
+
+    public String tokenDigest(String token) {
+        if (token == null) {
+            return "";
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hashed = digest.digest(token.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(hashed.length * 2);
+            for (byte b : hashed) {
+                builder.append(String.format("%02x", b));
+            }
+            return builder.toString();
+        } catch (Exception e) {
+            throw new IllegalStateException("token digest failed", e);
         }
     }
 
@@ -114,6 +136,12 @@ public class JwtTokenService {
         Pattern pattern = Pattern.compile("\"" + key + "\"\\s*:\\s*(\\d+)");
         Matcher matcher = pattern.matcher(json);
         return matcher.find() ? Long.parseLong(matcher.group(1)) : null;
+    }
+
+    private String randomJti() {
+        byte[] bytes = new byte[16];
+        SECURE_RANDOM.nextBytes(bytes);
+        return base64Url(bytes);
     }
 }
 

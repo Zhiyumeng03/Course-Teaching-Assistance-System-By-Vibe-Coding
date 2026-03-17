@@ -10,6 +10,18 @@ export function login(data) {
   return request.post('/api/user/login', data)
 }
 
+export function loginBySms(data) {
+  return request.post('/api/user/login/sms', data)
+}
+
+export function sendSmsCode(data) {
+  return request.post('/api/user/sms/send-code', data)
+}
+
+export function logout() {
+  return request.post('/api/user/logout')
+}
+
 /**
  * 用户注册
  * POST /api/user/register
